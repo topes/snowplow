@@ -77,11 +77,13 @@ trait PiiStrategy {
  * from a JValue.
  */
 object PiiPseudonymizerEnrichment extends ParseableEnrichment {
-  val supportedSchema = SchemaCriterion("com.snowplowanalytics.snowplow.enrichments", "pii_enrichment_config", "jsonscehma", 1, 0, 0)
+  val supportedSchema = SchemaCriterion("com.snowplowanalytics.snowplow.enrichments", "pii_enrichment_config", "jsonscehma", 1)
 
   def parse(config: JValue, schemaKey: SchemaKey): ValidatedNelMessage[PiiPseudonymizerEnrichment] = {
     for {
-      conf      <- matchesSchema(config, schemaKey)
+      conf <- matchesSchema(config, schemaKey)
+      enabled                 = ScalazJson4sUtils.extract[Boolean](conf, "enabled").toOption.getOrElse(false)
+      emitIdentificationEvent = ScalazJson4sUtils.extract[Boolean](conf, "emitIdentificationEvent").toOption.getOrElse(false)
       piiFields <- ScalazJson4sUtils.extract[List[JObject]](conf, "parameters", "pii").leftMap(_.getMessage)
       strategyFunction <- ScalazJson4sUtils
         .extract[String](config, "parameters", "strategy", "pseudonymize", "hashFunction")
@@ -98,17 +100,17 @@ object PiiPseudonymizerEnrichment extends ParseableEnrichment {
         case JObject(
             List(
               ("json",
-               JObject(List(
-               ("field", JString(fieldName)),
-               ("schemaCriterion", JString(schemaCriterion)),
-               ("jsonPath", JString(jsonPath))))))) =>
+               JObject(
+                 List(("field", JString(fieldName)), ("schemaCriterion", JString(schemaCriterion)), ("jsonPath", JString(jsonPath))))))) =>
           SchemaCriterion
             .parse(schemaCriterion)
-            .flatMap { sc => PiiJson(strategy, fieldName, sc, jsonPath).success }
+            .flatMap { sc =>
+              PiiJson(strategy, fieldName, sc, jsonPath).success
+            }
             .leftMap(_.getMessage)
         case x => "Configuration file has unexpected structure".fail
       }.sequenceU
-    } yield PiiPseudonymizerEnrichment(piiFieldList)
+    } yield if (enabled) PiiPseudonymizerEnrichment(piiFieldList, emitIdentificationEvent) else PiiPseudonymizerEnrichment(List())
   }.leftMap(getProcessingMessage(_)).toValidationNel
 
   private def getProcessingMessage(s: String): ProcessingMessage = {
@@ -137,9 +139,9 @@ object PiiPseudonymizerEnrichment extends ParseableEnrichment {
  * EnrichedEvent, whereas a JSON is a "context" formatted field (a JSON string in "contexts" field in enriched event)
  *
  * @param fieldList a lits of configured PiiFields
+ * @param emitIdentificationEvent whether to emit an identification event
  */
-case class PiiPseudonymizerEnrichment(fieldList: List[PiiField]) extends Enrichment {
-  override val version: DefaultArtifactVersion              = new DefaultArtifactVersion("99999.66666.33333")
+case class PiiPseudonymizerEnrichment(fieldList: List[PiiField], emitIdentificationEvent: Boolean = false) extends Enrichment {
   def transformer(transformMap: TransformMap): TransformMap = transformMap ++ fieldList.map(_.transformer(transformMap)).reduce(_ ++ _)
 }
 

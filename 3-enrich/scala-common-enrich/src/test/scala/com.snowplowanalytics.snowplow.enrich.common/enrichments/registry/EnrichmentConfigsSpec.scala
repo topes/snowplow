@@ -290,7 +290,7 @@ class EnrichmentConfigsSpec extends Specification with ValidationMatchers {
   }
 
   "Parsing a valid pii_enrichment_config enrichment JSON" should {
-    "successfully construct a PiiPsedonymizerEnrichment case object" in {
+    "successfully construct a PiiPsedonymizerEnrichment case object out of 1-0-0 version config" in {
       val piiPseudonymizerEnrichmentJson = parse("""{
           |  "enabled": true,
           |  "parameters": {
@@ -344,7 +344,69 @@ class EnrichmentConfigsSpec extends Specification with ValidationMatchers {
             (piiRes.fieldList(1).asInstanceOf[PiiJson].schemaCriterion.toString must_== "iglu:com.acme/email_sent/jsonschema/1-*-*") and
             (piiRes.fieldList(1).asInstanceOf[PiiJson].jsonPath must_== "$.emailAddress") and
             (piiRes.fieldList(1).asInstanceOf[PiiJson].strategy.asInstanceOf[PiiStrategyPseudonymize].hashFunction.toString must contain(
-              "SHA-256"))
+              "SHA-256") and
+              (piiRes.emitIdentificationEvent mustEqual (false)))
+        }
+      }
+    }
+
+    "successfully construct a PiiPsedonymizerEnrichment case object out of 1-1-0 version config" in {
+      val piiPseudonymizerEnrichmentJson = parse("""{
+                                                   |  "enabled": true,
+                                                   |  "emitIdentificationEvent": true,
+                                                   |  "parameters": {
+                                                   |    "pii": [
+                                                   |      {
+                                                   |        "pojo": {
+                                                   |          "field": "user_id"
+                                                   |        }
+                                                   |      },
+                                                   |      {
+                                                   |        "json": {
+                                                   |          "field": "contexts",
+                                                   |          "schemaCriterion": "iglu:com.acme/email_sent/jsonschema/1-*-*",
+                                                   |          "jsonPath": "$.emailAddress"
+                                                   |        }
+                                                   |      }
+                                                   |    ],
+                                                   |    "strategy": {
+                                                   |      "pseudonymize": {
+                                                   |        "hashFunction": "SHA-256"
+                                                   |      }
+                                                   |    }
+                                                   |  }
+                                                   |}""".stripMargin)
+
+      val schemaKey = SchemaKey("com.snowplowanalytics.snowplow.enrichments", "pii_enrichment_config", "jsonscehma", "1-0-0")
+
+      val result = PiiPseudonymizerEnrichment.parse(piiPseudonymizerEnrichmentJson, schemaKey)
+      val expected = PiiPseudonymizerEnrichment(
+        fieldList = List(
+          PiiPojo(strategy  = PiiStrategyPseudonymize(hashFunction = java.security.MessageDigest.getInstance("SHA-256")),
+                  fieldName = "user_id"),
+          PiiJson(
+            strategy        = PiiStrategyPseudonymize(hashFunction = java.security.MessageDigest.getInstance("SHA-256")),
+            fieldName       = "contexts",
+            schemaCriterion = SchemaCriterion.parse("iglu:com.acme/email_sent/jsonschema/1-*-*").toOption.get,
+            jsonPath        = "$.emailAddress"
+          )
+        )
+      )
+      result must beSuccessful.like {
+        case piiRes: PiiPseudonymizerEnrichment => {
+          (piiRes.fieldList.size must_== 2) and
+            (piiRes.fieldList(0) must haveClass[PiiPojo]) and
+            (piiRes.fieldList(0).asInstanceOf[PiiPojo].strategy must haveClass[PiiStrategyPseudonymize]) and
+            (piiRes.fieldList(0).asInstanceOf[PiiPojo].strategy.asInstanceOf[PiiStrategyPseudonymize].hashFunction.toString must contain(
+              "SHA-256")) and
+            (piiRes.fieldList(0).asInstanceOf[PiiPojo].fieldName must_== "user_id") and
+            (piiRes.fieldList(1).asInstanceOf[PiiJson].strategy must haveClass[PiiStrategyPseudonymize]) and
+            (piiRes.fieldList(1).asInstanceOf[PiiJson].fieldName must_== "contexts") and
+            (piiRes.fieldList(1).asInstanceOf[PiiJson].schemaCriterion.toString must_== "iglu:com.acme/email_sent/jsonschema/1-*-*") and
+            (piiRes.fieldList(1).asInstanceOf[PiiJson].jsonPath must_== "$.emailAddress") and
+            (piiRes.fieldList(1).asInstanceOf[PiiJson].strategy.asInstanceOf[PiiStrategyPseudonymize].hashFunction.toString must contain(
+              "SHA-256") and
+              (piiRes.emitIdentificationEvent mustEqual (true)))
         }
       }
     }
